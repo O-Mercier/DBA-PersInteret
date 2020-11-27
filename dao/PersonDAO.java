@@ -9,10 +9,11 @@ import java.util.Date;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import com.mongodb.Bytes;
+import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.Binary;
-
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Filters;
@@ -24,6 +25,18 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.TextSearchOptions;
+//test
+import com.mongodb.Block;
+import com.mongodb.MongoClient;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.gridfs.*;
+import com.mongodb.client.gridfs.model.*;
+import org.bson.Document;
+import org.bson.types.ObjectId;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
+import static com.mongodb.client.model.Filters.eq;
 
 import ca.qc.cvm.dba.persinteret.entity.Person;
 
@@ -46,24 +59,46 @@ public class PersonDAO {
 	 * @param withImage true si l'image est nécessaire, false sinon.
 	 * @param limit permet de restreindre les résultats
 	 * @return la liste des personnes, selon le filtre si nécessaire et filtre
+	 *
+	 *
+	 * ref: https://mongodb.github.io/mongo-java-driver/3.4/driver/tutorials/gridfs/
 	 */
 	public static List<Person> getPeopleList(String filterText, boolean withImage, int limit) {
 		final List<Person> peopleList = new ArrayList<Person>();
-		MongoDatabase connection = MongoConnection.getConnection();
-		MongoCollection<Document> collection = connection.getCollection("personnes");
-		collection.createIndex(Indexes.ascending("name"));
-		/*
-		//fuuuuuck me
-		Document filter = new Document("")
-		FindIterable<Document> result;
-		if(filterText != null) {
-			Bson filter = Filters.regex("name",".*" + filterText + ".*");
-			result = collection.find(filter).limit(limit);
+		byte[] img = null;
+		try {
+			MongoDatabase connection = MongoConnection.getConnection();
+			MongoCollection<Document> collection = connection.getCollection("personnes");
+			GridFSBucket bucket = GridFSBuckets.create(connection, "images");
+			FindIterable<Document> result;
+			Document reg = new Document();
+			reg.append("$regex", filterText + ".*");
+			reg.append("$options", "i");
+			Document query = new Document();
+			query.append("name", reg);
+			result = collection.find(query).limit(limit);
+			for (Document r : result) {
+				String name = (String) r.get("name");
+				if (withImage) {
+					GridFSDownloadStream downloadStream = bucket.openDownloadStream(name);
+					int fileLength = (int) downloadStream.getGridFSFile().getLength();
+					img = new byte[fileLength];
+					downloadStream.read(img);
+				}
+				peopleList.add(new Person(
+						name,
+						(String) r.get("codeName"),
+						(String) r.get("status"),
+						(String) r.get("dateOfBirth"),
+						null,
+						img));
+			}
 		}
-		else
-			return =*/
-
+		catch (Exception e) {
+			e.printStackTrace();
+		}
 		return peopleList;
+
 	}
 
 	/**
@@ -84,27 +119,36 @@ public class PersonDAO {
 	 * 
 	 * @param person
 	 * @return true si succès, false sinon
+	 *
+	 * ref: https://mongodb.github.io/mongo-java-driver/3.4/driver/tutorials/gridfs/
+	 *
 	 */
 	public static boolean save(Person person) {
 		boolean success = false;
-		try {
+
 			MongoDatabase connection = MongoConnection.getConnection();
 			MongoCollection<Document> collection = connection.getCollection("personnes");
+			GridFSBucket bucket = GridFSBuckets.create(connection, "images");
 			Document doc = new Document ();
-			doc.append("id", person.getId());
+			InputStream imgStream = new ByteArrayInputStream(person.getImageData());
+			doc.append("id", person.getId()); //todo
 			doc.append("name", person.getName());
 			doc.append("codeName", person.getCodeName());
 			doc.append("dateOfBirth", person.getDateOfBirth());
 			doc.append("status", person.getStatus());
-			doc.append("imageData", person.getImageData());
-			collection.insertOne(doc);
+			if (person.getId() == null){
+				collection.insertOne(doc);
+			}
+			else{ //todo
+				collection.replaceOne(eq("name", person.getName()),doc);
+
+				//bucket.delete();
+
+			}
+			bucket.uploadFromStream(person.getName(),imgStream);
+			collection.createIndex(Indexes.ascending("name"), new IndexOptions().unique(true));
 			success = true;
-		}
-		catch (Exception e) {
-			e.printStackTrace();
-		}
-		
-		
+
 		return success;
 	}
 	
