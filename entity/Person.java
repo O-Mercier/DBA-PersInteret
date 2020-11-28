@@ -1,5 +1,7 @@
 package ca.qc.cvm.dba.persinteret.entity;
 
+import org.bson.BsonValue;
+
 import java.util.List;
 
 
@@ -11,7 +13,6 @@ public class Person {
 	private String dateOfBirth;
 	private List<String> connexions;
 	private byte[] imageData;
-	
 	public Person() {
 		
 	}
@@ -67,6 +68,9 @@ public class Person {
 
 	public void setId(Long id) {
 		this.id = id;
+	}
+	public void setId(int id) {
+		this.id = (long) id;
 	}
 
 	public void setName(String name) {

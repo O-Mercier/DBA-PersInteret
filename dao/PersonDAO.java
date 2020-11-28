@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 import com.mongodb.Bytes;
+import com.mongodb.client.*;
 import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -18,10 +19,6 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.Block;
-import com.mongodb.client.AggregateIterable;
-import com.mongodb.client.FindIterable;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.TextSearchOptions;
@@ -37,7 +34,7 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.charset.StandardCharsets;
 import static com.mongodb.client.model.Filters.eq;
-
+import static com.mongodb.client.model.Updates.*;
 import ca.qc.cvm.dba.persinteret.entity.Person;
 
 public class PersonDAO {
@@ -78,20 +75,20 @@ public class PersonDAO {
 			query.append("name", reg);
 			result = collection.find(query).limit(limit);
 			for (Document r : result) {
-				String name = (String) r.get("name");
 				if (withImage) {
-					GridFSDownloadStream downloadStream = bucket.openDownloadStream(name);
+					GridFSDownloadStream downloadStream = bucket.openDownloadStream(r.get("id").toString());
 					int fileLength = (int) downloadStream.getGridFSFile().getLength();
 					img = new byte[fileLength];
 					downloadStream.read(img);
 				}
 				peopleList.add(new Person(
-						name,
-						(String) r.get("codeName"),
-						(String) r.get("status"),
-						(String) r.get("dateOfBirth"),
+						 r.getString("name"),
+						 r.getString("codeName"),
+						 r.getString("status"),
+						 r.getString("dateOfBirth"),
 						null,
 						img));
+				peopleList.get(peopleList.size() - 1).setId(r.getLong("id"));
 			}
 		}
 		catch (Exception e) {
@@ -121,37 +118,63 @@ public class PersonDAO {
 	 * @return true si succès, false sinon
 	 *
 	 * ref: https://mongodb.github.io/mongo-java-driver/3.4/driver/tutorials/gridfs/
+	 * 		https://stackoverflow.com/questions/41223691/how-to-overwrite-image-in-mongodb-gridfs
 	 *
 	 */
-	public static boolean save(Person person) {
+	public static boolean save(Person person) { //todo unfuck id typing
 		boolean success = false;
-
+		try {
 			MongoDatabase connection = MongoConnection.getConnection();
 			MongoCollection<Document> collection = connection.getCollection("personnes");
 			GridFSBucket bucket = GridFSBuckets.create(connection, "images");
-			Document doc = new Document ();
+			boolean create = (person.getId() == null);
 			InputStream imgStream = new ByteArrayInputStream(person.getImageData());
-			doc.append("id", person.getId()); //todo
-			doc.append("name", person.getName());
-			doc.append("codeName", person.getCodeName());
-			doc.append("dateOfBirth", person.getDateOfBirth());
-			doc.append("status", person.getStatus());
-			if (person.getId() == null){
+			if (create) {
+				if (getPeopleCount() == 0)
+					person.setId(0);
+				else
+					person.setId(collection.find().sort(new Document("_id", -1)).first().getLong("id") + 1);
+				Document doc = new Document();
+				doc.append("id", person.getId());
+				doc.append("name", person.getName());
+				doc.append("codeName", person.getCodeName());
+				doc.append("dateOfBirth", person.getDateOfBirth());
+				doc.append("status", person.getStatus());
 				collection.insertOne(doc);
+			} else { //todo
+				collection.updateOne(eq("id", person.getId()), combine(set("name", person.getName()),
+						set("codeName", person.getCodeName()),
+						set("dateOfBirth", person.getDateOfBirth()),
+						set("status", person.getStatus())));
+				bucket.delete(getObjId(connection, person.getId().toString()));
 			}
-			else{ //todo
-				collection.replaceOne(eq("name", person.getName()),doc);
-
-				//bucket.delete();
-
-			}
-			bucket.uploadFromStream(person.getName(),imgStream);
+			bucket.uploadFromStream(person.getId().toString(), imgStream);
 			collection.createIndex(Indexes.ascending("name"), new IndexOptions().unique(true));
 			success = true;
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+		}
 
 		return success;
 	}
-	
+	//TODO
+	/*private Document insertQuerryBuilder(Person person){ //move combine here
+
+	}
+
+	private Bson updateQuerryBuilder(Person person){ //move combine here
+
+	}*/
+
+	public static ObjectId getObjId(MongoDatabase connection, String id) { //todo unfuck id typing (bis)
+		Document query = new Document("filename", id);
+		MongoCursor<Document> cursor = connection.getCollection("images.files").find(query).iterator();
+		Document document = cursor.next();
+		ObjectId _id = document.getObjectId("_id");
+		return _id;
+	}
+
 	/**
 	 * Suppression des données/fiche d'une personne
 	 * 
@@ -160,7 +183,8 @@ public class PersonDAO {
 	 */
 	public static boolean delete(Person person) {
 		boolean success = true;
-		
+
+
 		return success;
 	}
 	
