@@ -4,13 +4,12 @@ import java.text.DateFormat;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Pattern;
 
-import com.mongodb.Bytes;
+import com.mongodb.*;
 import com.mongodb.client.*;
+import org.bson.BsonDocument;
 import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -18,13 +17,10 @@ import org.bson.types.Binary;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Filters;
-import com.mongodb.Block;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.TextSearchOptions;
-//test
 import com.mongodb.Block;
-import com.mongodb.MongoClient;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.gridfs.*;
 import com.mongodb.client.gridfs.model.*;
@@ -36,6 +32,18 @@ import java.nio.charset.StandardCharsets;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Updates.*;
 import ca.qc.cvm.dba.persinteret.entity.Person;
+import org.neo4j.driver.Session;
+import org.neo4j.driver.Driver;
+import org.neo4j.driver.Record;
+import org.neo4j.driver.Session;
+import org.neo4j.driver.StatementResult;
+import org.neo4j.driver.Transaction;
+import org.neo4j.driver.internal.value.NodeValue;
+import org.neo4j.driver.internal.value.RelationshipValue;
+import org.neo4j.driver.types.Node;
+import org.neo4j.driver.types.Relationship;
+
+
 
 public class PersonDAO {
 	
@@ -67,6 +75,7 @@ public class PersonDAO {
 			MongoDatabase connection = MongoConnection.getConnection();
 			MongoCollection<Document> collection = connection.getCollection("personnes");
 			GridFSBucket bucket = GridFSBuckets.create(connection, "images");
+			Session session = Neo4jConnection.getConnection();
 			FindIterable<Document> result;
 			Document reg = new Document();
 			reg.append("$regex", filterText + ".*");
@@ -89,7 +98,18 @@ public class PersonDAO {
 						null,
 						img));
 				peopleList.get(peopleList.size() - 1).setId(r.getLong("id"));
+				Map<String, Object> params = new HashMap<String, Object>();
+				params.put("p1",r.get("id").toString());
+				StatementResult results = session.run("MATCH (a:Personne )-->(p:Personne) WHERE a.identification = {p1} RETURN p",params);
+				//StatementResult results = session.run("MATCH (n{id:{p1}}) RETURN n",params);
+				while (results.hasNext()){
+					Record record = results.next();
+					System.out.println(record.fields());
+				}
+
+
 			}
+
 		}
 		catch (Exception e) {
 			e.printStackTrace();
@@ -122,7 +142,7 @@ public class PersonDAO {
 	 *
 	 */
 	public static boolean save(Person person) { //todo unfuck id typing
-		boolean success = false;
+		boolean success = true;
 		try {
 			MongoDatabase connection = MongoConnection.getConnection();
 			MongoCollection<Document> collection = connection.getCollection("personnes");
@@ -150,16 +170,39 @@ public class PersonDAO {
 			}
 			bucket.uploadFromStream(person.getId().toString(), imgStream);
 			collection.createIndex(Indexes.ascending("name"), new IndexOptions().unique(true));
-			success = true;
+			create_connections(collection,person);
 		}
 		catch (Exception e) {
 			e.printStackTrace();
+			success = false;
 		}
-
 		return success;
 	}
+
+	private static void create_connections(MongoCollection<Document> collection, Person person){
+		try {
+			Session session = Neo4jConnection.getConnection();
+			Map<String, Object> params = new HashMap<String, Object>();
+			params.put("p1", person.getId());
+			session.run("MERGE (c:Personne {identification: {p1}})", params);
+			Document doc = new Document();
+			doc.put("name", new Document("$in",person.getConnexions()));
+			FindIterable<Document> result = collection.find(doc);
+			for (Document r : result) {
+				params.put("p2", r.getLong("id"));
+				session.run("MATCH (a:Personne),(b:Personne) WHERE a.identification = {p1} AND b.identification = {p2} MERGE (a)-[r:Connexion]->(b)", params);
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+
+
+
+
+
 	//TODO
-	/*private Document insertQuerryBuilder(Person person){ //move combine here
+	/*private Document insertQuerryBuilder(Person person){ //move combine h
 
 	}
 

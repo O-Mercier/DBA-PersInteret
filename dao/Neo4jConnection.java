@@ -27,7 +27,7 @@ public class Neo4jConnection {
 	 */
 	public static Session getConnection() {		
 		if (graphDB == null) {
-			graphDB = GraphDatabase.driver( "bolt://localhost:7687", AuthTokens.basic( "neo4j", "AAAaaa111") );
+			graphDB = GraphDatabase.driver( "bolt://localhost:7687", AuthTokens.basic( "neo4j", "root") );
 			session = graphDB.session();
 		}
 		
